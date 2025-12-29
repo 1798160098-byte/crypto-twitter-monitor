@@ -22,7 +22,7 @@ TARGET_ACCOUNTS = [
 
 # n8n 的 Webhook 地址 (这是你截图里的测试地址)
 # 如果你以后换了 Production URL，记得回来改这里
-N8N_WEBHOOK_URL = "http://43.139.57.215:5678/webhook-test/6d6ea3d6-ba16-4d9d-9145-22425474ab48"
+N8N_WEBHOOK_URL = "http://43.139.57.215:5678/webhook/6d6ea3d6-ba16-4d9d-9145-22425474ab48"
 
 # 每一轮检查的间隔 (分钟)
 CHECK_INTERVAL_MINUTES = 15
