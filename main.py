@@ -3,6 +3,7 @@ import json
 import time
 import schedule
 import random
+import re
 from bs4 import BeautifulSoup
 from datetime import datetime
 
@@ -37,17 +38,15 @@ try:
     test_payload = {
         "source": "twitter_monitor",
         "author": "System_Test",
-        "content_raw": "🎉 恭喜！Zeabur 机器人已切换至 [Sotwe镜像模式]！这是一条测试消息。",
+        "content_raw": "🎉 恭喜！Zeabur 机器人已切换至 [Twstalker 模式]！这是一条测试消息。",
         "link": "https://twitter.com/home",
-        "tweet_id": "test_connection_sotwe",
+        "tweet_id": "test_connection_twstalker",
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     }
-    # 发送测试包
     requests.post(N8N_WEBHOOK_URL, json=test_payload, timeout=10)
-    print("✅ [System] 测试信号发送成功！快去 n8n 看绿灯！", flush=True)
+    print("✅ [System] 测试信号发送成功！", flush=True)
 except Exception as e:
     print(f"❌ [System] 测试信号发送失败: {e}", flush=True)
-    print("   (提示：请检查 n8n 的 Webhook 地址是否正确，或者 n8n 是否正在运行)", flush=True)
 # =========================================
 
 
@@ -55,102 +54,125 @@ except Exception as e:
 last_seen_ids = {}
 
 def get_latest_tweets():
-    print(f"\n[{datetime.now().strftime('%H:%M:%S')}] === [Sotwe模式] 开始检查 ({len(TARGET_ACCOUNTS)} 位博主) ===", flush=True)
+    print(f"\n[{datetime.now().strftime('%H:%M:%S')}] === [Twstalker模式] 开始检查 ({len(TARGET_ACCOUNTS)} 位博主) ===", flush=True)
     
     for username in TARGET_ACCOUNTS:
         try:
             print(f"正在检查: @{username} ...", end="", flush=True)
             
-            # === 🔥 修改点 1: 目标变成了 Sotwe 镜像站 ===
-            url = f"https://www.sotwe.com/{username}"
+            # === 🔥 修改点 1: 目标变成了 Twstalker ===
+            url = f"https://twstalker.com/{username}"
             headers = {
-                # 伪装成普通浏览器，防止 Cloudflare 拦截
+                # 模拟更真实的浏览器头，试图骗过 Cloudflare
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Referer": "https://www.google.com/"
+                "Referer": "https://www.google.com/",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.9"
             }
             
-            response = requests.get(url, headers=headers, timeout=15)
+            response = requests.get(url, headers=headers, timeout=20)
             
+            # 检查是否被 Cloudflare 拦截
+            if "Just a moment" in response.text or "Cloudflare" in response.text:
+                print(" -> ⚠️ 被 Cloudflare 盾拦截 (403/503)", flush=True)
+                continue
+
             if response.status_code == 200:
                 soup = BeautifulSoup(response.text, "html.parser")
                 
-                # === 🔥 修改点 2: Sotwe 的数据也在 __NEXT_DATA__ 里，但结构不同 ===
-                next_data = soup.find("script", {"id": "__NEXT_DATA__"})
+                # === 🔥 修改点 2: Twstalker 的 HTML 解析逻辑 ===
+                # Twstalker 的页面结构通常包含很多链接，我们需要找到带有 /status/ 的链接
+                # 这些链接通常是推文的时间戳链接
                 
-                if next_data:
-                    data = json.loads(next_data.string)
-                    try:
-                        # Sotwe 的 JSON 路径: props -> pageProps -> data -> posts
-                        # 注意：Sotwe 有时候会返回空列表，需要判断
-                        user_data = data.get('props', {}).get('pageProps', {}).get('data', {})
-                        posts = user_data.get('posts', [])
+                found_tweets = []
+                
+                # 查找所有的链接
+                links = soup.find_all('a', href=True)
+                
+                for link in links:
+                    href = link['href']
+                    # 匹配推文链接格式: /username/status/1234567890
+                    # 正则表达式提取 ID
+                    match = re.search(r'/status/(\d+)', href)
+                    if match:
+                        tweet_id = match.group(1)
                         
-                        if posts:
-                            # === 🔥 优化: 强制按时间倒序排列，防止置顶推文干扰 🔥 ===
-                            # Sotwe 的时间字段是 createdAt (毫秒时间戳)
-                            posts.sort(key=lambda x: int(x['createdAt']), reverse=True)
+                        # 尝试找到这个链接对应的推文文本
+                        # Twstalker 的结构比较乱，通常文本在链接的父级或附近的 div 里
+                        # 这里做一个简单的尝试：找这个链接所在的卡片容器
+                        # 如果找不到精确的文本，我们至少拿到了 ID，文本可以先空着或者填 "点击查看"
+                        
+                        # 简单的抓取策略：在这个链接附近找文本
+                        # 这种抓取方式不一定完美，但能拿到 ID 最重要
+                        card_text = "点击链接查看详情 (Twstalker 解析限制)"
+                        try:
+                            # 尝试找父级容器的文本
+                            parent = link.find_parent('div')
+                            if parent:
+                                card_text = parent.get_text(strip=True)
+                                # 清理掉一些多余的按钮文字
+                                card_text = card_text.replace("Reply", "").replace("Share", "").strip()[:200] + "..."
+                        except:
+                            pass
                             
-                            # 取最新的一条
-                            latest_post = posts[0]
-                            
-                            # 提取字段 (Sotwe 的字段名和推特官方不一样)
-                            tweet_id = latest_post['id']   # Sotwe 直接用推特 ID
-                            tweet_text = latest_post['text']
-                            
-                            # 时间处理：毫秒转字符串
-                            created_at_ts = int(latest_post['createdAt']) / 1000
-                            created_at_str = datetime.fromtimestamp(created_at_ts).strftime('%Y-%m-%d %H:%M:%S')
+                        found_tweets.append({
+                            'id': tweet_id,
+                            'text': card_text,
+                            'link': f"https://twitter.com/{username}/status/{tweet_id}"
+                        })
 
-                            # --- 核心对比逻辑 ---
-                            # 初始化
-                            if username not in last_seen_ids:
-                                last_seen_ids[username] = tweet_id
-                                print(f" -> [初始化] 最新 ID: {tweet_id}", flush=True)
-                            
-                            # 发现新推文
-                            elif last_seen_ids[username] != tweet_id:
-                                print(f"\n  -> ★ 发现新推文！(Sotwe源) 准备推送...", flush=True)
-                                
-                                payload = {
-                                    "source": "twitter_monitor_sotwe",
-                                    "author": username,
-                                    "content_raw": tweet_text,
-                                    # 链接我们还是拼凑成推特官方的，方便你点击跳转
-                                    "link": f"https://twitter.com/{username}/status/{tweet_id}",
-                                    "tweet_id": tweet_id,
-                                    "timestamp": created_at_str
-                                }
-                                
-                                try:
-                                    requests.post(N8N_WEBHOOK_URL, json=payload, timeout=10)
-                                    print("  -> 推送成功 ✅", flush=True)
-                                    last_seen_ids[username] = tweet_id
-                                except Exception as e:
-                                    print(f"  -> ❌ 推送失败: {e}", flush=True)
-                                
-                            else:
-                                print(f" -> 无更新 ({created_at_str})", flush=True)
-                        else:
-                            print(" -> 未找到推文 (可能是空号或被隐藏)", flush=True)
-                                
-                    except Exception as e:
-                        # 捕获解析错误，防止程序崩溃
-                        print(f" -> 解析结构异常: {e}", flush=True)
+                if found_tweets:
+                    # === 🔥 优化: 按 ID 倒序排列，取数值最大的（最新的） ===
+                    # 这样可以自动忽略掉 ID 较小的置顶推文
+                    found_tweets.sort(key=lambda x: int(x['id']), reverse=True)
+                    
+                    latest_tweet = found_tweets[0]
+                    tweet_id = latest_tweet['id']
+                    tweet_text = latest_tweet['text']
+                    
+                    # --- 核心对比逻辑 ---
+                    if username not in last_seen_ids:
+                        last_seen_ids[username] = tweet_id
+                        print(f" -> [初始化] 最新 ID: {tweet_id}", flush=True)
+                    
+                    elif last_seen_ids[username] != tweet_id:
+                        print(f"\n  -> ★ 发现新推文！(Twstalker源) 准备推送...", flush=True)
+                        
+                        payload = {
+                            "source": "twitter_monitor_twstalker",
+                            "author": username,
+                            "content_raw": tweet_text,
+                            "link": latest_tweet['link'],
+                            "tweet_id": tweet_id,
+                            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S") # Twstalker 抓取时间不准，直接用当前时间
+                        }
+                        
+                        try:
+                            requests.post(N8N_WEBHOOK_URL, json=payload, timeout=10)
+                            print("  -> 推送成功 ✅", flush=True)
+                            last_seen_ids[username] = tweet_id
+                        except Exception as e:
+                            print(f"  -> ❌ 推送失败: {e}", flush=True)
+                        
+                    else:
+                        print(f" -> 无更新", flush=True)
                 else:
-                    print(" -> 未找到数据标签 (__NEXT_DATA__)", flush=True)
+                    print(" -> 未找到任何推文 ID (可能页面结构变了)", flush=True)
+            
+            elif response.status_code == 403:
+                print(" -> 访问被拒绝 (403 Forbidden)", flush=True)
             else:
                 print(f" -> 访问失败: {response.status_code}", flush=True)
 
         except Exception as e:
-            print(f" -> 网络或其他异常: {e}", flush=True)
+            print(f" -> 异常: {e}", flush=True)
             
-        # 随机延迟，虽然 Sotwe 不怎么封号，但保持礼貌是好习惯
-        sleep_time = random.uniform(5, 8)
-        time.sleep(sleep_time)
+        # 随机延迟
+        time.sleep(random.uniform(5, 8))
 
     print(f"=== 本轮检查结束，等待 {CHECK_INTERVAL_MINUTES} 分钟 ===\n", flush=True)
 
-# 启动后立刻执行一次检查
+# 启动后立刻执行一次
 get_latest_tweets()
 
 # 定时任务
