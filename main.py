@@ -45,7 +45,7 @@ def get_latest_tweets():
     }
 
     # 动态拼接 URL
-    url = f"https://twitter.com/i/api/graphql/{CURRENT_QUERY_ID}/SearchTimeline"
+    url = f"https://x.com/i/api/graphql/{CURRENT_QUERY_ID}/SearchTimeline"
 
     for username in TARGET_ACCOUNTS:
         try:
