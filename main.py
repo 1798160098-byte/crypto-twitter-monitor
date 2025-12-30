@@ -6,14 +6,13 @@ import random
 import urllib.parse
 from datetime import datetime
 
-# ================= 核心配置区 (请仔细填写) =================
+# ================= 核心配置区 =================
 
-# 1. 【最关键一步】请把浏览器里复制的那条长链接完整粘贴在下面引号里！
-#    (也就是右键 -> Copy link address 得到的那一长串)
-#    代码会自动从里面提取正确的 ID 和参数，不用你手动改了。
+# 1. 【粘贴处】请再次粘贴那条长链接（确保是 Copy URL 得到的完整链接）
+#    这一版代码会自动读取链接里的所有参数，不再手写，防止出错。
 Browser_Link = "https://x.com/i/api/graphql/M1jEez78PEfVfbQLvlWMvQ/SearchTimeline?variables=%7B%22rawQuery%22%3A%22from%3Alubi366%22%2C%22count%22%3A20%2C%22querySource%22%3A%22typed_query%22%2C%22product%22%3A%22Top%22%2C%22withGrokTranslatedBio%22%3Afalse%7D&features=%7B%22rweb_video_screen_enabled%22%3Afalse%2C%22profile_label_improvements_pcf_label_in_post_enabled%22%3Atrue%2C%22responsive_web_profile_redirect_enabled%22%3Afalse%2C%22rweb_tipjar_consumption_enabled%22%3Atrue%2C%22verified_phone_label_enabled%22%3Afalse%2C%22creator_subscriptions_tweet_preview_api_enabled%22%3Atrue%2C%22responsive_web_graphql_timeline_navigation_enabled%22%3Atrue%2C%22responsive_web_graphql_skip_user_profile_image_extensions_enabled%22%3Afalse%2C%22premium_content_api_read_enabled%22%3Afalse%2C%22communities_web_enable_tweet_community_results_fetch%22%3Atrue%2C%22c9s_tweet_anatomy_moderator_badge_enabled%22%3Atrue%2C%22responsive_web_grok_analyze_button_fetch_trends_enabled%22%3Afalse%2C%22responsive_web_grok_analyze_post_followups_enabled%22%3Atrue%2C%22responsive_web_jetfuel_frame%22%3Atrue%2C%22responsive_web_grok_share_attachment_enabled%22%3Atrue%2C%22articles_preview_enabled%22%3Atrue%2C%22responsive_web_edit_tweet_api_enabled%22%3Atrue%2C%22graphql_is_translatable_rweb_tweet_is_translatable_enabled%22%3Atrue%2C%22view_counts_everywhere_api_enabled%22%3Atrue%2C%22longform_notetweets_consumption_enabled%22%3Atrue%2C%22responsive_web_twitter_article_tweet_consumption_enabled%22%3Atrue%2C%22tweet_awards_web_tipping_enabled%22%3Afalse%2C%22responsive_web_grok_show_grok_translated_post%22%3Afalse%2C%22responsive_web_grok_analysis_button_from_backend%22%3Atrue%2C%22creator_subscriptions_quote_tweet_preview_enabled%22%3Afalse%2C%22freedom_of_speech_not_reach_fetch_enabled%22%3Atrue%2C%22standardized_nudges_misinfo%22%3Atrue%2C%22tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled%22%3Atrue%2C%22longform_notetweets_rich_text_read_enabled%22%3Atrue%2C%22longform_notetweets_inline_media_enabled%22%3Atrue%2C%22responsive_web_grok_image_annotation_enabled%22%3Atrue%2C%22responsive_web_grok_imagine_annotation_enabled%22%3Atrue%2C%22responsive_web_grok_community_note_auto_translation_is_enabled%22%3Afalse%2C%22responsive_web_enhance_cards_enabled%22%3Afalse%7D" 
 
-# 2. 你的 Cookie (如果浏览器刷新过，请务必重新抓取更新)
+# 2. 你的 Cookie (如果浏览器刷新过，建议重新去 Application 栏看一眼有没有变)
 MY_AUTH_TOKEN = "c3778b43e1705ad15fd2e8b683087db33fb3aa1e"
 MY_CT0 = "368af3c63dffcc690f8557421437270654944077c8fdd21103da457e4225508284c606385efa8dd6b74c5463e87eb42c0c91b68620b1e1827e0c8e8eb1db381efcc70fdce615e3d0351dc886b27b0cf0"
 
@@ -29,36 +28,42 @@ N8N_WEBHOOK_URL = "http://43.139.245.223:5678/webhook/6d6ea3d6-ba16-4d9d-9145-22
 
 # 5. 时间设置
 CHECK_INTERVAL_MINUTES = 16 
-# =======================================================
+# ============================================
 
 last_seen_ids = {}
 
-def get_base_url_and_features(full_url):
-    """从长链接中提取干净的 URL 模板"""
+def parse_browser_link(full_url):
+    """
+    深度解析长链接，提取所有“原生”参数
+    """
     try:
         parsed = urllib.parse.urlparse(full_url)
-        # 强制使用 x.com
-        base = f"https://x.com{parsed.path}"
+        # 1. 提取基础 URL (包含 ID)
+        base_url = f"https://x.com{parsed.path}"
         
-        # 解析参数
-        params = urllib.parse.parse_qs(parsed.query)
+        # 2. 提取参数
+        qs = urllib.parse.parse_qs(parsed.query)
         
-        # 提取 features (最容易错的地方，直接用浏览器原版的)
-        features = params.get('features', [''])[0]
+        # 3. 提取 features (原样保留)
+        features_json = qs.get('features', ['{}'])[0]
         
-        return base, features
+        # 4. 提取 variables (这是关键！我们要用它做模板)
+        variables_str = qs.get('variables', ['{}'])[0]
+        variables_template = json.loads(variables_str)
+        
+        return base_url, features_json, variables_template
     except Exception as e:
         print(f"❌ 链接解析失败: {e}")
-        return None, None
+        return None, None, None
 
 def get_latest_tweets():
-    print(f"\n[{datetime.now().strftime('%H:%M:%S')}] === [1:1 完美复刻版] 开始检查 ===", flush=True)
+    print(f"\n[{datetime.now().strftime('%H:%M:%S')}] === [完全寄生版] 开始检查 ===", flush=True)
     
-    # 解析用户提供的长链接
-    base_url, features_json = get_base_url_and_features(Browser_Link)
+    # 动态解析链接
+    base_url, features_json, variables_template = parse_browser_link(Browser_Link)
     
-    if not base_url or not features_json:
-        print("❌ 错误：请确保你在代码里填入了正确的 Browser_Link 长链接！", flush=True)
+    if not base_url or not variables_template:
+        print("❌ 错误：Browser_Link 解析失败，请检查是否完整粘贴！", flush=True)
         return
 
     headers = {
@@ -76,25 +81,24 @@ def get_latest_tweets():
         try:
             print(f"正在检查: @{username} ...", end="", flush=True)
             
-            # 动态构造 variables，保留原版所有参数
-            variables = {
-                "rawQuery": f"from:{username}",
-                "count": 5,
-                "querySource": "typed_query",
-                "product": "Latest"
+            # === 核心逻辑修改 ===
+            # 我们不再手写 variables，而是复制一份浏览器的模板，只改 "rawQuery"
+            current_variables = variables_template.copy()
+            current_variables["rawQuery"] = f"from:{username}"
+            
+            # 构造请求参数
+            params = {
+                "variables": json.dumps(current_variables),
+                "features": features_json
             }
             
             # 发送请求
-            params = {
-                "variables": json.dumps(variables),
-                "features": features_json 
-            }
-            
             response = requests.get(base_url, headers=headers, params=params, timeout=15)
             
             if response.status_code == 200:
                 data = response.json()
                 try:
+                    # 尝试解析推文
                     instructions = data['data']['search_by_raw_query']['search_timeline']['timeline']['instructions']
                     entries = []
                     for instr in instructions:
@@ -143,12 +147,15 @@ def get_latest_tweets():
                         print(" -> 列表为空 (正常)", flush=True)
 
                 except Exception as e:
-                    print(f" -> 解析跳过: {e}", flush=True)
+                    # 有时候搜索结果为空结构会不一样，忽略即可
+                    print(f" -> 解析跳过 (可能无结果): {e}", flush=True)
+
             elif response.status_code == 404:
-                print(" -> ❌ 404 错误！请检查 Browser_Link 是否完整复制！", flush=True)
+                print(" -> ❌ 404 错误！", flush=True)
+                # 如果还是 404，大概率是 Cookie 过期了，或者链接里的 variables 还是不对
                 break 
             elif response.status_code == 401 or response.status_code == 403:
-                print(" -> ❌ 认证失败 (Cookie失效，请更新)", flush=True)
+                print(" -> ❌ 认证失败 (Cookie 失效)", flush=True)
                 break
             else:
                 print(f" -> 请求失败: {response.status_code}", flush=True)
@@ -161,8 +168,9 @@ def get_latest_tweets():
 
     print(f"=== 本轮结束，等待 {CHECK_INTERVAL_MINUTES} 分钟 ===\n", flush=True)
 
-if Browser_Link == "这里粘贴你复制的长链接":
-    print("❌❌❌ 警告：你还没有填入 Browser_Link！请去浏览器复制！❌❌❌")
+# 检查是否粘贴了链接
+if "graphql" not in Browser_Link:
+     print("❌❌❌ 警告：你还没有填入正确的 Browser_Link！请去浏览器复制！❌❌❌")
 else:
     print("🔥 [System] 启动...", flush=True)
     get_latest_tweets()
