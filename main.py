@@ -1,5 +1,4 @@
 import requests
-import json
 import time
 import schedule
 import random
@@ -14,111 +13,106 @@ TARGET_ACCOUNTS = [
 ]
 
 N8N_WEBHOOK_URL = "http://43.139.245.223:5678/webhook/6d6ea3d6-ba16-4d9d-9145-22425474ab48"
+CHECK_INTERVAL_MINUTES = 20
 
-# 建议稍微调长一点，15-20分钟，太频繁容易触发 Rate Limit
-CHECK_INTERVAL_MINUTES = 20 
-
-# 随机 User-Agent 池，伪装成不同设备
-USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/119.0",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
+# Nitter 实例列表 (如果一个挂了，会自动试下一个)
+NITTER_INSTANCES = [
+    "https://nitter.privacydev.net",
+    "https://nitter.poast.org",
+    "https://nitter.lucabased.xyz",
+    "https://nitter.net"
 ]
 # =========================================
 
 last_seen_ids = {}
 
 def get_latest_tweets():
-    print(f"\n[{datetime.now().strftime('%H:%M:%S')}] === [官方接口复活版] 开始检查 ===", flush=True)
+    print(f"\n[{datetime.now().strftime('%H:%M:%S')}] === [Nitter RSS 轮询版] 开始检查 ===", flush=True)
     
+    # 随机打乱实例顺序，负载均衡
+    current_instances = list(NITTER_INSTANCES)
+    random.shuffle(current_instances)
+
     for username in TARGET_ACCOUNTS:
-        try:
-            print(f"正在检查: @{username} ...", end="", flush=True)
-            
-            # 随机参数 + 官方 syndication 接口
-            ts = int(time.time())
-            url = f"https://syndication.twitter.com/srv/timeline-profile/screen-name/{username}?t={ts}"
-            
-            headers = {
-                "User-Agent": random.choice(USER_AGENTS),
-                "Referer": "https://twitter.com/",
-                "Accept-Language": "en-US,en;q=0.9"
-            }
-            
-            response = requests.get(url, headers=headers, timeout=15)
-            
-            if response.status_code == 200:
-                soup = BeautifulSoup(response.text, "html.parser")
-                next_data = soup.find("script", {"id": "__NEXT_DATA__"})
+        success = False
+        print(f"正在检查: @{username} ...", end="", flush=True)
+        
+        for instance in current_instances:
+            try:
+                # 构造 RSS 地址
+                url = f"{instance}/{username}/rss"
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                }
                 
-                if next_data:
-                    data = json.loads(next_data.string)
-                    try:
-                        # 官方路径提取
-                        entries = data['props']['pageProps']['timeline']['entries']
-                        tweets = [e for e in entries if e['type'] == 'Tweet']
+                # 尝试请求
+                response = requests.get(url, headers=headers, timeout=10)
+                
+                if response.status_code == 200:
+                    # 解析 RSS XML
+                    soup = BeautifulSoup(response.content, "xml")
+                    items = soup.find_all("item")
+                    
+                    if items:
+                        latest_item = items[0]
                         
-                        if tweets:
-                            latest_tweet = tweets[0]
-                            content = latest_tweet['content']['tweet']
-                            tweet_id = content['id_str']
-                            tweet_text = content['text']
-                            created_at = content['created_at'] # e.g., Thu Apr 06 15:28:43 +0000 2023
+                        # 提取信息
+                        title = latest_item.title.text
+                        link = latest_item.link.text
+                        pub_date = latest_item.pubDate.text
+                        description = latest_item.description.text
+                        
+                        # 从链接中提取 ID (格式: .../status/123456789)
+                        tweet_id = link.split('/')[-1].split('#')[0]
+                        
+                        # --- 对比逻辑 ---
+                        if username not in last_seen_ids:
+                            last_seen_ids[username] = tweet_id
+                            print(f" -> [初始化] 最新 ID: {tweet_id} (节点: {instance})", flush=True)
+                        
+                        elif last_seen_ids[username] != tweet_id:
+                            print(f"\n  -> ★ 发现新推文！准备推送...", flush=True)
                             
-                            # 时间格式美化
+                            payload = {
+                                "source": "twitter_monitor_nitter",
+                                "author": username,
+                                "content_raw": title, # RSS 的 title 通常就是推文内容
+                                "link": link.replace(instance, "https://twitter.com"), # 替换回官方链接
+                                "tweet_id": tweet_id,
+                                "timestamp": pub_date
+                            }
+                            
                             try:
-                                dt = datetime.strptime(created_at, '%a %b %d %H:%M:%S +0000 %Y')
-                                readable_time = dt.strftime('%Y-%m-%d %H:%M:%S')
-                            except:
-                                readable_time = created_at
-
-                            # --- 对比逻辑 ---
-                            if username not in last_seen_ids:
+                                requests.post(N8N_WEBHOOK_URL, json=payload, timeout=10)
+                                print("  -> 推送成功 ✅", flush=True)
                                 last_seen_ids[username] = tweet_id
-                                print(f" -> [初始化] 最新 ID: {tweet_id}", flush=True)
-                            
-                            elif last_seen_ids[username] != tweet_id:
-                                print(f"\n  -> ★ 发现新推文！推送中...", flush=True)
-                                
-                                payload = {
-                                    "source": "twitter_monitor_official",
-                                    "author": username,
-                                    "content_raw": tweet_text,
-                                    "link": f"https://twitter.com/{username}/status/{tweet_id}",
-                                    "tweet_id": tweet_id,
-                                    "timestamp": readable_time
-                                }
-                                
-                                try:
-                                    requests.post(N8N_WEBHOOK_URL, json=payload, timeout=10)
-                                    print("  -> 推送成功 ✅", flush=True)
-                                    last_seen_ids[username] = tweet_id
-                                except Exception as e:
-                                    print(f"  -> ❌ 推送失败: {e}", flush=True)
-                            else:
-                                print(f" -> 无更新 ({readable_time})", flush=True)
+                            except Exception as e:
+                                print(f"  -> ❌ 推送失败: {e}", flush=True)
                         else:
-                            print(" -> 列表为空", flush=True)
-                    except Exception as e:
-                        print(f" -> 解析跳过: {e}", flush=True)
+                            print(f" -> 无更新 (节点: {instance})", flush=True)
+                        
+                        success = True
+                        break # 这个节点成功了，跳出实例循环，检查下一个用户
+                    else:
+                        # 200 OK 但没有 item，可能是空账号或解析失败，尝试下一个节点
+                        continue
                 else:
-                    print(" -> 未找到数据标签", flush=True)
-            elif response.status_code == 429:
-                print(" -> ⚠️ 限流 (Rate Limit)，休息一会", flush=True)
-            else:
-                print(f" -> 访问失败: {response.status_code}", flush=True)
-
-        except Exception as e:
-            print(f" -> 异常: {e}", flush=True)
+                    # 状态码不是 200，尝试下一个节点
+                    continue
+                    
+            except Exception:
+                # 发生异常，尝试下一个节点
+                continue
+        
+        if not success:
+            print(" -> ❌ 所有 Nitter 节点均访问失败", flush=True)
             
-        # 增加延迟，防止触发 429
-        time.sleep(random.uniform(10, 15))
+        # 每个用户之间稍微停顿一下
+        time.sleep(random.uniform(2, 5))
 
-    print(f"=== 本轮结束，等待 {CHECK_INTERVAL_MINUTES} 分钟 ===\n", flush=True)
+    print(f"=== 本轮检查结束，等待 {CHECK_INTERVAL_MINUTES} 分钟 ===\n", flush=True)
 
 # 启动
-print("🔥 [System] 机器人已复活，使用官方接口通道...", flush=True)
 get_latest_tweets()
 schedule.every(CHECK_INTERVAL_MINUTES).minutes.do(get_latest_tweets)
 
