@@ -8,7 +8,7 @@ from datetime import datetime
 # ================= 核心配置区 =================
 # 1. 刚刚提取的 Query ID (注意大小写！)
 # 根据你的截图，这里填的是大写 F 的版本。如果报错 404，请尝试改成小写 f
-CURRENT_QUERY_ID = "M1jEez78PEfVfbQLvlWMvQ"
+CURRENT_QUERY_ID = "M1jEez78PEFVfbQLvlWMvQ"
 
 # 2. 你的 Cookie 凭证
 MY_AUTH_TOKEN = "c3778b43e1705ad15fd2e8b683087db33fb3aa1e"
