@@ -9,20 +9,23 @@ from datetime import datetime
 # ================= 配置区 =================
 # 你的关注列表
 TARGET_ACCOUNTS = [
-    "cz_binance",
-    "elonmusk",
+    "lubi366",
     "connectfarm1",
-    "ai_9684xtpa",
-    "coindesk",
-    "lookonchain",
-    "cryptoquant_com",
+    "wolfyxbt",
+    "Crypto_He",
+    "BroLeon",
+    "0xcryptowizard",
+    "one_snowball",
     "yueya_eth",
-    "wolfyxbt"
+    "qlonline",
+    "ai_9684xtpa",
+    "cz_binance",
+    "linwanwan823"
 ]
 
 # n8n 的 Webhook 地址 (这是你截图里的测试地址)
 # 如果你以后换了 Production URL，记得回来改这里
-N8N_WEBHOOK_URL = "http://43.139.57.215:5678/webhook/6d6ea3d6-ba16-4d9d-9145-22425474ab48"
+N8N_WEBHOOK_URL = "http://43.139.245.223:5678/webhook/6d6ea3d6-ba16-4d9d-9145-22425474ab48"
 
 # 每一轮检查的间隔 (分钟)
 CHECK_INTERVAL_MINUTES = 15
