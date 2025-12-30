@@ -7,7 +7,7 @@ from bs4 import BeautifulSoup
 from datetime import datetime
 
 # ================= 配置区 =================
-# 你的关注列表
+# 你的关注列表 (12位博主)
 TARGET_ACCOUNTS = [
     "lubi366",
     "connectfarm1",
@@ -23,17 +23,16 @@ TARGET_ACCOUNTS = [
     "linwanwan823"
 ]
 
-# n8n 的 Webhook 地址 (这是你截图里的测试地址)
-# 如果你以后换了 Production URL，记得回来改这里
+# n8n 的 Webhook 地址
 N8N_WEBHOOK_URL = "http://43.139.245.223:5678/webhook/6d6ea3d6-ba16-4d9d-9145-22425474ab48"
 
 # 每一轮检查的间隔 (分钟)
 CHECK_INTERVAL_MINUTES = 15
 
 # =========================================
-# 🔥🔥🔥 核心修改区：启动时强制发一条测试消息 🔥🔥🔥
+# 🔥🔥🔥 启动测试区 🔥🔥🔥
 # =========================================
-print("🔥 [System] 正在尝试发送测试信号给 n8n...")
+print("🔥 [System] 正在尝试发送测试信号给 n8n...", flush=True)
 try:
     test_payload = {
         "source": "twitter_monitor",
@@ -45,10 +44,10 @@ try:
     }
     # 发送测试包
     requests.post(N8N_WEBHOOK_URL, json=test_payload, timeout=10)
-    print("✅ [System] 测试信号发送成功！快去 n8n 看绿灯！")
+    print("✅ [System] 测试信号发送成功！快去 n8n 看绿灯！", flush=True)
 except Exception as e:
-    print(f"❌ [System] 测试信号发送失败: {e}")
-    print("   (提示：请检查 n8n 的 Webhook 地址是否正确，或者 n8n 是否正在运行)")
+    print(f"❌ [System] 测试信号发送失败: {e}", flush=True)
+    print("   (提示：请检查 n8n 的 Webhook 地址是否正确，或者 n8n 是否正在运行)", flush=True)
 # =========================================
 
 
@@ -56,11 +55,11 @@ except Exception as e:
 last_seen_ids = {}
 
 def get_latest_tweets():
-    print(f"\n[{datetime.now().strftime('%H:%M:%S')}] === 开始新一轮检查 ({len(TARGET_ACCOUNTS)} 位博主) ===")
+    print(f"\n[{datetime.now().strftime('%H:%M:%S')}] === 开始新一轮检查 ({len(TARGET_ACCOUNTS)} 位博主) ===", flush=True)
     
     for username in TARGET_ACCOUNTS:
         try:
-            print(f"正在检查: @{username} ...")
+            print(f"正在检查: @{username} ...", end="", flush=True) # end="" 不换行，为了日志好看
             
             url = f"https://syndication.twitter.com/srv/timeline-profile/screen-name/{username}"
             headers = {
@@ -92,14 +91,14 @@ def get_latest_tweets():
                             tweet_text = tweet_content['text']
                             created_at = tweet_content['created_at']
                             
-                            # 初始化：第一次只记录，不发送 (避免刷屏旧消息)
+                            # 初始化：第一次只记录，不发送
                             if username not in last_seen_ids:
                                 last_seen_ids[username] = tweet_id
-                                print(f"  -> 初始化状态，记录最新 ID: {tweet_id}")
+                                print(f" -> [初始化] 记录 ID: {tweet_id}", flush=True)
                             
                             # 发现新推文
                             elif last_seen_ids[username] != tweet_id:
-                                print(f"  -> ★ 发现新推文！准备推送...")
+                                print(f"\n  -> ★ 发现新推文！准备推送...", flush=True)
                                 
                                 payload = {
                                     "source": "twitter_monitor",
@@ -111,25 +110,29 @@ def get_latest_tweets():
                                 }
                                 
                                 requests.post(N8N_WEBHOOK_URL, json=payload, timeout=10)
-                                print("  -> 推送成功")
+                                print("  -> 推送成功 ✅", flush=True)
                                 
                                 last_seen_ids[username] = tweet_id
                             else:
-                                print("  -> 无更新")
+                                print(" -> 无更新", flush=True)
                                 
                     except Exception as e:
-                        print(f"  -> 数据解析跳过: {e}")
+                        print(f" -> 数据解析跳过: {e}", flush=True)
             else:
-                print(f"  -> 接口访问失败: {response.status_code}")
+                print(f" -> 接口访问失败: {response.status_code}", flush=True)
 
         except Exception as e:
-            print(f"  -> 发生异常: {e}")
+            print(f" -> 发生异常: {e}", flush=True)
             
-        # 防止封禁的随机延迟
-        sleep_time = random.uniform(3, 6)
+        # =================================================
+        # 🔥 修改处：改为 8-12 秒随机延迟，防止 429 封禁 🔥
+        # =================================================
+        sleep_time = random.uniform(8, 12)
+        # 打印出来让你看到它在休息，而不是死机了
+        # print(f"   (休息 {sleep_time:.1f} 秒...)", flush=True) 
         time.sleep(sleep_time)
 
-    print(f"=== 本轮检查结束，等待 {CHECK_INTERVAL_MINUTES} 分钟 ===\n")
+    print(f"=== 本轮检查结束，等待 {CHECK_INTERVAL_MINUTES} 分钟 ===\n", flush=True)
 
 # 启动后立刻执行一次检查
 get_latest_tweets()
