@@ -1,4 +1,4 @@
-import requests
+import cloudscraper
 import time
 import schedule
 import random
@@ -15,7 +15,7 @@ TARGET_ACCOUNTS = [
 N8N_WEBHOOK_URL = "http://43.139.245.223:5678/webhook/6d6ea3d6-ba16-4d9d-9145-22425474ab48"
 CHECK_INTERVAL_MINUTES = 20
 
-# Nitter 实例列表 (如果一个挂了，会自动试下一个)
+# Nitter 实例池 (精选比较稳的)
 NITTER_INSTANCES = [
     "https://nitter.privacydev.net",
     "https://nitter.poast.org",
@@ -26,10 +26,20 @@ NITTER_INSTANCES = [
 
 last_seen_ids = {}
 
+# 创建一个能够绕过 Cloudflare 的 scraper 实例
+# browser 参数模拟 Chrome 桌面版
+scraper = cloudscraper.create_scraper(
+    browser={
+        'browser': 'chrome',
+        'platform': 'windows',
+        'desktop': True
+    }
+)
+
 def get_latest_tweets():
-    print(f"\n[{datetime.now().strftime('%H:%M:%S')}] === [Nitter RSS 轮询版] 开始检查 ===", flush=True)
+    print(f"\n[{datetime.now().strftime('%H:%M:%S')}] === [Cloudscraper 破盾版] 开始检查 ===", flush=True)
     
-    # 随机打乱实例顺序，负载均衡
+    # 随机打乱节点顺序
     current_instances = list(NITTER_INSTANCES)
     random.shuffle(current_instances)
 
@@ -39,30 +49,24 @@ def get_latest_tweets():
         
         for instance in current_instances:
             try:
-                # 构造 RSS 地址
+                # 目标：Nitter 的 RSS 页面
                 url = f"{instance}/{username}/rss"
-                headers = {
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                }
                 
-                # 尝试请求
-                response = requests.get(url, headers=headers, timeout=10)
+                # 使用 scraper 发送请求，而不是 requests
+                response = scraper.get(url, timeout=15)
                 
                 if response.status_code == 200:
-                    # 解析 RSS XML
+                    # 解析 XML
                     soup = BeautifulSoup(response.content, "xml")
                     items = soup.find_all("item")
                     
                     if items:
                         latest_item = items[0]
-                        
-                        # 提取信息
                         title = latest_item.title.text
                         link = latest_item.link.text
                         pub_date = latest_item.pubDate.text
-                        description = latest_item.description.text
                         
-                        # 从链接中提取 ID (格式: .../status/123456789)
+                        # ID 提取
                         tweet_id = link.split('/')[-1].split('#')[0]
                         
                         # --- 对比逻辑 ---
@@ -71,18 +75,20 @@ def get_latest_tweets():
                             print(f" -> [初始化] 最新 ID: {tweet_id} (节点: {instance})", flush=True)
                         
                         elif last_seen_ids[username] != tweet_id:
-                            print(f"\n  -> ★ 发现新推文！准备推送...", flush=True)
+                            print(f"\n  -> ★ 发现新推文！推送中...", flush=True)
                             
                             payload = {
-                                "source": "twitter_monitor_nitter",
+                                "source": "twitter_monitor_cloudscraper",
                                 "author": username,
-                                "content_raw": title, # RSS 的 title 通常就是推文内容
-                                "link": link.replace(instance, "https://twitter.com"), # 替换回官方链接
+                                "content_raw": title,
+                                "link": f"https://twitter.com/{username}/status/{tweet_id}",
                                 "tweet_id": tweet_id,
                                 "timestamp": pub_date
                             }
                             
                             try:
+                                # Webhook 依然用普通 requests 发送即可
+                                import requests 
                                 requests.post(N8N_WEBHOOK_URL, json=payload, timeout=10)
                                 print("  -> 推送成功 ✅", flush=True)
                                 last_seen_ids[username] = tweet_id
@@ -92,25 +98,24 @@ def get_latest_tweets():
                             print(f" -> 无更新 (节点: {instance})", flush=True)
                         
                         success = True
-                        break # 这个节点成功了，跳出实例循环，检查下一个用户
+                        break # 成功则跳出实例循环
                     else:
-                        # 200 OK 但没有 item，可能是空账号或解析失败，尝试下一个节点
+                        # 200 但无内容
                         continue
                 else:
-                    # 状态码不是 200，尝试下一个节点
+                    # 如果不是 200，说明这个节点可能也被封了，试下一个
                     continue
-                    
-            except Exception:
-                # 发生异常，尝试下一个节点
+
+            except Exception as e:
+                # print(f" (节点 {instance} 异常: {e}) ", end="") # 调试用
                 continue
         
         if not success:
-            print(" -> ❌ 所有 Nitter 节点均访问失败", flush=True)
+            print(" -> ❌ 全节点失败 (IP可能被暂时拉黑)", flush=True)
             
-        # 每个用户之间稍微停顿一下
-        time.sleep(random.uniform(2, 5))
+        time.sleep(random.uniform(3, 6))
 
-    print(f"=== 本轮检查结束，等待 {CHECK_INTERVAL_MINUTES} 分钟 ===\n", flush=True)
+    print(f"=== 本轮结束，等待 {CHECK_INTERVAL_MINUTES} 分钟 ===\n", flush=True)
 
 # 启动
 get_latest_tweets()
