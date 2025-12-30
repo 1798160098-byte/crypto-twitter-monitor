@@ -10,7 +10,7 @@ from datetime import datetime
 # 根据你的截图，这里填的是大写 F 的版本。如果报错 404，请尝试改成小写 f
 CURRENT_QUERY_ID = "M1jEez78PEfVfbQLvlWMvQ"
 
-# 2. 你的 Cookie 凭证 (保持不变)
+# 2. 你的 Cookie 凭证
 MY_AUTH_TOKEN = "c3778b43e1705ad15fd2e8b683087db33fb3aa1e"
 MY_CT0 = "368af3c63dffcc690f8557421437270654944077c8fdd21103da457e4225508284c606385efa8dd6b74c5463e87eb42c0c91b68620b1e1827e0c8e8eb1db381efcc70fdce615e3d0351dc886b27b0cf0"
 
