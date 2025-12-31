@@ -15,121 +15,151 @@ TARGET_ACCOUNTS = [
 
 N8N_WEBHOOK_URL = "http://43.139.245.223:5678/webhook/6d6ea3d6-ba16-4d9d-9145-22425474ab48"
 
-# ================= 🔴 核心凭证 (保持你刚才填的) =================
+# ================= 🔴 核心凭证 (请确认 Cookie 是最新的) =================
 
-cookies = {
-    'guest_id': 'v1%3A176710344905549891',
-    'auth_token': 'c3778b43e1705ad15fd2e8b683087db33fb3aa1e',
-    'ct0': '368af3c63dffcc690f8557421437270654944077c8fdd21103da457e4225508284c606385efa8dd6b74c5463e87eb42c0c91b68620b1e1827e0c8e8eb1db381efcc70fdce615e3d0351dc886b27b0cf0',
-    'lang': 'en',
-    'twid': 'u%3D2006001874949009408', 
-    'personalization_id': '"v1_H+HZUYrPDKtvqjYJt3R+rw=="',
-}
+# 只需要填入 raw_cookie_str，代码会自动处理 ct0
+raw_cookie_str = """
+guest_id=v1%3A176710344905549891; auth_token=c3778b43e1705ad15fd2e8b683087db33fb3aa1e; ct0=368af3c63dffcc690f8557421437270654944077c8fdd21103da457e4225508284c606385efa8dd6b74c5463e87eb42c0c91b68620b1e1827e0c8e8eb1db381efcc70fdce615e3d0351dc886b27b0cf0; lang=en; twid=u%3D2006001874949009408; personalization_id="v1_H+HZUYrPDKtvqjYJt3R+rw=="
+"""
+
+# 自动解析 Cookie
+cookies = {}
+for item in raw_cookie_str.split(';'):
+    if '=' in item:
+        name, value = item.split('=', 1)
+        cookies[name.strip()] = value.strip()
+
+# 自动提取 CSRF Token
+csrf_token = cookies.get('ct0')
 
 headers = {
     'authorization': 'Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA',
     'content-type': 'application/json',
-    'x-csrf-token': cookies['ct0'],
+    'x-csrf-token': csrf_token, # 动态填充
     'x-twitter-auth-type': 'OAuth2Session',
     'x-twitter-client-language': 'en',
+    'referer': 'https://x.com/' # 增加 Referer
 }
 
-features_json = '{"rweb_video_screen_enabled":false,"profile_label_improvements_pcf_label_in_post_enabled":true,"responsive_web_profile_redirect_enabled":false,"rweb_tipjar_consumption_enabled":true,"verified_phone_label_enabled":false,"creator_subscriptions_tweet_preview_api_enabled":true,"responsive_web_graphql_timeline_navigation_enabled":true,"responsive_web_graphql_skip_user_profile_image_extensions_enabled":false,"premium_content_api_read_enabled":false,"communities_web_enable_tweet_community_results_fetch":true,"c9s_tweet_anatomy_moderator_badge_enabled":true,"responsive_web_grok_analyze_button_fetch_trends_enabled":false,"responsive_web_grok_analyze_post_followups_enabled":true,"responsive_web_jetfuel_frame":true,"responsive_web_grok_share_attachment_enabled":true,"articles_preview_enabled":true,"responsive_web_edit_tweet_api_enabled":true,"graphql_is_translatable_rweb_tweet_is_translatable_enabled":true,"view_counts_everywhere_api_enabled":true,"longform_notetweets_consumption_enabled":true,"responsive_web_twitter_article_tweet_consumption_enabled":true,"tweet_awards_web_tipping_enabled":false,"responsive_web_grok_show_grok_translated_post":false,"responsive_web_grok_analysis_button_from_backend":true,"creator_subscriptions_quote_tweet_preview_enabled":false,"freedom_of_speech_not_reach_fetch_enabled":true,"standardized_nudges_misinfo":true,"tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled":true,"longform_notetweets_rich_text_read_enabled":true,"longform_notetweets_inline_media_enabled":true,"responsive_web_grok_image_annotation_enabled":true,"responsive_web_grok_imagine_annotation_enabled":true,"responsive_web_grok_community_note_auto_translation_is_enabled":false,"responsive_web_enhance_cards_enabled":false}'
+# ================= 新版接口：个人主页模式 (UserTweets) =================
 
-# 【核心修改】更换了 SearchTimeline 的 Query ID
-# 旧的: M1jEez78PEfVfbQLvlWMvQ (可能已过期)
-# 新的: nK1dw4oV3k4w5TdtcAdSww (目前常用)
-BASE_URL = 'https://x.com/i/api/graphql/nK1dw4oV3k4w5TdtcAdSww/SearchTimeline'
+# 1. 获取 ID: UserByScreenName
+URL_ID = 'https://x.com/i/api/graphql/sLVLhk0bGj3mVFEKTrp1RA/UserByScreenName'
+# 2. 获取推文: UserTweets
+URL_TWEETS = 'https://x.com/i/api/graphql/HuTx74eKg15Gu4fOYJ-XQB/UserTweets'
+
+user_id_cache = {} 
 last_seen_ids = {}
 
-def fetch_data(username):
+def get_user_id(username):
+    """根据用户名换取数字ID"""
+    if username in user_id_cache:
+        return user_id_cache[username]
+    
+    # 简单的 UserByScreenName 变量
+    variables = {"screen_name": username, "withSafetyModeUserFields": True}
+    features = {"hidden_profile_likes_enabled": False, "responsive_web_graphql_exclude_directive_enabled": True, "verified_phone_label_enabled": False, "subscriptions_verification_info_is_identity_verified_enabled": False, "subscriptions_verification_info_verified_since_enabled": True, "highlights_tweets_tab_ui_enabled": True, "responsive_web_twitter_article_notes_tab_enabled": False, "creator_subscriptions_tweet_preview_api_enabled": True, "responsive_web_graphql_skip_user_profile_image_extensions_enabled": False, "responsive_web_graphql_timeline_navigation_enabled": True}
+    
     try:
-        headers['referer'] = f'https://x.com/search?q=from%3A{username}&src=typed_query'
-        current_variables = '{"rawQuery":"from:USERNAME","count":20,"querySource":"typed_query","product":"Latest","withGrokTranslatedBio":false}'.replace("USERNAME", username)
-        
-        response = requests.get(
-            BASE_URL,
-            params={'variables': current_variables, 'features': features_json},
-            cookies=cookies,
-            headers=headers,
-            timeout=30,
-            impersonate="chrome110" 
-        )
-        return response
+        r = requests.get(URL_ID, params={'variables': json.dumps(variables), 'features': json.dumps(features)}, cookies=cookies, headers=headers, impersonate="chrome110")
+        if r.status_code == 200:
+            uid = r.json().get('data', {}).get('user', {}).get('result', {}).get('rest_id')
+            if uid:
+                user_id_cache[username] = uid
+                return uid
+    except:
+        pass
+    return None
+
+def fetch_tweets(username, uid):
+    """获取该ID的推文"""
+    variables = {
+        "userId": uid,
+        "count": 20,
+        "includePromotedContent": True,
+        "withQuickPromoteEligibilityTweetFields": True,
+        "withVoice": True,
+        "withV2Timeline": True
+    }
+    features = {
+        "rweb_video_screen_enabled": False,
+        "responsive_web_graphql_exclude_directive_enabled": True,
+        "verified_phone_label_enabled": False,
+        "creator_subscriptions_tweet_preview_api_enabled": True,
+        "responsive_web_graphql_timeline_navigation_enabled": True,
+        "responsive_web_graphql_skip_user_profile_image_extensions_enabled": False,
+        "tweet_awards_web_tipping_enabled": False,
+        "communities_web_enable_tweet_community_results_fetch": True,
+        "c9s_tweet_anatomy_moderator_badge_enabled": True,
+        "tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled": True,
+        "responsive_web_grok_image_annotation_enabled": False,
+        "responsive_web_enhance_cards_enabled": False
+    }
+
+    try:
+        return requests.get(URL_TWEETS, params={'variables': json.dumps(variables), 'features': json.dumps(features)}, cookies=cookies, headers=headers, impersonate="chrome110", timeout=15)
     except Exception as e:
-        print(f"   🔥 连接错误: {e}", flush=True)
+        print(f"   🔥 网络错误: {e}", flush=True)
         return None
 
-def get_latest_tweets():
-    print(f"\n[{datetime.now().strftime('%H:%M:%S')}] === 开始新一轮 (API更新版) ===", flush=True)
+def main_loop():
+    print(f"\n[{datetime.now().strftime('%H:%M:%S')}] === 启动主页监控 (UserTweets) ===", flush=True)
+    
+    if not csrf_token:
+        print("❌ 错误: Cookie中没有找到ct0，请重新获取Cookie！", flush=True)
+        return
 
     for username in TARGET_ACCOUNTS:
         print(f"Checking: @{username} ... ", end="", flush=True)
         
-        response = fetch_data(username)
-
-        # 404 调试模式：打印具体的错误信息
-        if response and response.status_code == 404:
-            print("⚠️ 404 错误详情:", end=" ")
-            try:
-                # 尝试解析推特返回的 JSON 错误
-                err_json = response.json()
-                print(f"{err_json}", flush=True)
-            except:
-                # 如果不是JSON，打印前100个字符
-                print(f"{response.text[:100]}", flush=True)
+        # 1. 拿ID
+        uid = get_user_id(username)
+        if not uid:
+            print("❌ 获取ID失败 (跳过)", flush=True)
+            time.sleep(2)
+            continue
             
-            # 如果是404，这通常是严重的配置错误，单个账号失败代表全部失败
-            # 暂时不再重试，节省资源
+        # 2. 拿推文
+        resp = fetch_tweets(username, uid)
         
-        elif response and response.status_code == 200:
+        if resp and resp.status_code == 200:
             try:
-                data = response.json()
-                # 兼容不同的数据结构（有时候 data 直接是 instructions，有时候包裹在 search_timeline 里）
-                timeline = data.get('data', {}).get('search_by_raw_query', {}).get('search_timeline', {}).get('timeline', {})
-                if not timeline:
-                     print("❌ 数据结构解析为空 (可能是空号)", flush=True)
-                     continue
-
+                # 复杂的解析路径，为了安全起见
+                timeline = resp.json().get('data', {}).get('user', {}).get('result', {}).get('timeline_v2', {}).get('timeline', {})
                 instructions = timeline.get('instructions', [])
                 
                 entries = []
-                for instr in instructions:
-                    if instr.get('type') == 'TimelineAddEntries':
-                        entries = instr.get('entries', [])
+                for i in instructions:
+                    if i.get('type') == 'TimelineAddEntries':
+                        entries = i.get('entries', [])
                         break
                 
-                new_tweets_list = []
+                new_tweets = []
                 for entry in entries:
                     if 'tweet' in entry['entryId']:
-                        res = entry.get('content', {}).get('itemContent', {}).get('tweet_results', {}).get('result', {})
-                        tweet_data = None
-                        if 'legacy' in res:
-                            tweet_data = res['legacy']
-                        elif 'tweet' in res and 'legacy' in res['tweet']:
-                            tweet_data = res['tweet']['legacy']
-                            
-                        if tweet_data:
-                            tid = tweet_data['id_str']
+                        legacy = entry.get('content', {}).get('itemContent', {}).get('tweet_results', {}).get('result', {}).get('legacy')
+                        if legacy:
+                            tid = legacy['id_str']
+                            # 初始化或发现新推文
                             if username not in last_seen_ids:
                                 last_seen_ids[username] = tid
                                 print(f"✅ 初始化: {tid}", flush=True)
                                 break
                             
                             if tid > last_seen_ids[username]:
-                                new_tweets_list.append(tweet_data)
+                                new_tweets.append(legacy)
 
-                if new_tweets_list:
-                    new_tweets_list.sort(key=lambda x: x['id_str'])
-                    print(f"🚀 发现 {len(new_tweets_list)} 条新推文!", flush=True)
-                    for t in new_tweets_list:
+                if new_tweets:
+                    new_tweets.sort(key=lambda x: x['id_str'])
+                    print(f"🚀 新推文: {len(new_tweets)}条", flush=True)
+                    for t in new_tweets:
                         tid = t['id_str']
+                        # 发送 Webhook
                         payload = {
-                            "source": "twitter_monitor_v2",
+                            "source": "monitor_v3_profile",
                             "author": username,
                             "content_raw": t['full_text'],
                             "link": f"https://x.com/{username}/status/{tid}",
-                            "tweet_id": tid,
                             "timestamp": t['created_at']
                         }
                         try:
@@ -141,25 +171,24 @@ def get_latest_tweets():
                     print("无更新", flush=True)
 
             except Exception as e:
-                print(f"解析失败: {e}", flush=True)
+                print(f"解析异常: {e}", flush=True)
 
-        elif response and response.status_code == 429:
-            print("⚠️ 429 限流 (休息60s)", flush=True)
+        elif resp and resp.status_code == 429:
+            print("⚠️ 限流 (休息60s)", flush=True)
             time.sleep(60)
         else:
-            code = response.status_code if response else "ConnectError"
+            code = resp.status_code if resp else "Error"
             print(f"❌ 失败: {code}", flush=True)
 
-        sleep_time = random.uniform(10, 20)
-        print(f"   (冷却 {sleep_time:.1f}s)", flush=True)
-        time.sleep(sleep_time)
+        # 慢一点，防止被Zeabur再次杀掉
+        time.sleep(random.uniform(10, 20))
 
-    print("=== 等待 12 分钟 ===", flush=True)
+    print("=== 休息 12 分钟 ===", flush=True)
 
 if __name__ == "__main__":
-    print("🔥 [System] API 更新版启动...", flush=True)
-    get_latest_tweets()
-    schedule.every(12).minutes.do(get_latest_tweets)
+    print("🔥 [System] 最终修正版启动...", flush=True)
+    main_loop()
+    schedule.every(12).minutes.do(main_loop)
 
     while True:
         schedule.run_pending()
