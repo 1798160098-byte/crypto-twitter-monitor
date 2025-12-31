@@ -1,6 +1,4 @@
-import requests
-from requests.adapters import HTTPAdapter
-from requests.packages.urllib3.util.retry import Retry
+from curl_cffi import requests # 核心改变：使用支持指纹模拟的 requests
 import time
 import schedule
 import random
@@ -17,7 +15,7 @@ TARGET_ACCOUNTS = [
 
 N8N_WEBHOOK_URL = "http://43.139.245.223:5678/webhook/6d6ea3d6-ba16-4d9d-9145-22425474ab48"
 
-# ================= 核心指纹 (身份对齐版) =================
+# ================= 核心指纹 (Chrome 120 完美模拟) =================
 
 cookies = {
     '__cuid': '5f0ccf0c997d476585709a15a55155fc',
@@ -42,15 +40,13 @@ headers = {
     'authorization': 'Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA',
     'content-type': 'application/json',
     'priority': 'u=1, i',
-    # Referer 动态生成
-    # 【关键修改】改为 Linux UA，与服务器真实环境一致，减少被踢下线的概率
-    'sec-ch-ua': '"Google Chrome";v="125", "Chromium";v="125", "Not.A/Brand";v="24"',
+    'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
     'sec-ch-ua-mobile': '?0',
-    'sec-ch-ua-platform': '"Linux"', 
+    'sec-ch-ua-platform': '"Windows"',
     'sec-fetch-dest': 'empty',
     'sec-fetch-mode': 'cors',
     'sec-fetch-site': 'same-origin',
-    'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     'x-client-transaction-id': 'xm5MEP54SgkDfStWNr627qPC1r6owJYc1dCKgiVwchXZiTbG2VnM1QYYSUOjBPNpNRL0w8MgGglhtnznK4jLUYOptoeoxQ',
     'x-csrf-token': '368af3c63dffcc690f8557421437270654944077c8fdd21103da457e4225508284c606385efa8dd6b74c5463e87eb42c0c91b68620b1e1827e0c8e8eb1db381efcc70fdce615e3d0351dc886b27b0cf0',
     'x-twitter-active-user': 'yes',
@@ -63,57 +59,41 @@ features_json = '{"rweb_video_screen_enabled":false,"profile_label_improvements_
 BASE_URL = 'https://x.com/i/api/graphql/M1jEez78PEfVfbQLvlWMvQ/SearchTimeline'
 last_seen_ids = {}
 
-# === 核心升级：创建自动重试的 Session ===
-def create_session():
-    session = requests.Session()
-    # 定义重试策略：遇到连接错误、500/502/503/504 等错误时，自动重试 3 次
-    retries = Retry(
-        total=3,
-        backoff_factor=1, # 重试间隔 1秒, 2秒, 4秒...
-        status_forcelist=[500, 502, 503, 504],
-        allowed_methods=["GET"]
-    )
-    # 将重试策略挂载到 https 请求上
-    adapter = HTTPAdapter(max_retries=retries)
-    session.mount("https://", adapter)
-    return session
-
-# 初始化全局 Session
-http_session = create_session()
+# 创建一个持久的 Session，并指定模拟 Chrome 120
+# impersonate="chrome120" 是解决 ConnectFail 的魔法钥匙
+session = requests.Session(impersonate="chrome120")
 
 def fetch_data(username):
     try:
         headers['referer'] = f'https://x.com/search?q=from%3A{username}&src=typed_query'
         current_variables = '{"rawQuery":"from:USERNAME","count":20,"querySource":"typed_query","product":"Latest","withGrokTranslatedBio":false}'.replace("USERNAME", username)
         
-        # 使用 http_session 而不是直接用 requests
-        response = http_session.get(
+        # 使用 curl_cffi 的 session 发送请求
+        response = session.get(
             BASE_URL,
             params={'variables': current_variables, 'features': features_json},
             cookies=cookies,
             headers=headers,
-            timeout=20 # 稍微增加超时时间
+            timeout=30 # 增加超时时间
         )
         return response
     except Exception as e:
-        # 打印具体的错误信息，方便我们彻底根治
-        print(f"   🔥 严重错误: {type(e).__name__} - {e}", flush=True)
+        print(f"   🔥 网络/TLS异常: {e}", flush=True)
         return None
 
 def get_latest_tweets():
-    print(f"\n[{datetime.now().strftime('%H:%M:%S')}] === 开始新一轮 (防断连加强版) ===", flush=True)
+    print(f"\n[{datetime.now().strftime('%H:%M:%S')}] === 开始新一轮 (TLS 指纹伪装版) ===", flush=True)
 
     for username in TARGET_ACCOUNTS:
         print(f"Checking: @{username} ... ", end="", flush=True)
         
         response = fetch_data(username)
 
-        # 404 处理 (这次我们不立刻重试，因为 Session 层面已经处理了连接错误)
-        # 如果还是 404，说明是推特因为频率拒绝了，我们需要更长的休息
+        # 404 重试逻辑
         if response and response.status_code == 404:
-            print("⚠️ 404 (流控), 稍微休息...", end="", flush=True)
-            time.sleep(6)
-            response = fetch_data(username) # 最后试一次
+            print("⚠️ 404, 模拟人类休息5s重试... ", end="", flush=True)
+            time.sleep(5)
+            response = fetch_data(username)
 
         if response and response.status_code == 200:
             try:
@@ -152,8 +132,10 @@ def get_latest_tweets():
                     for t in new_tweets_list:
                         tid = t['id_str']
                         print(f"   -> 发送: {tid}", flush=True)
+                        # 这里 Webhook 还是用普通的 requests 发，因为不需要伪装
+                        # 我们可以直接用 session 发，也没问题
                         payload = {
-                            "source": "twitter_monitor_final",
+                            "source": "twitter_monitor_tls",
                             "author": username,
                             "content_raw": t['full_text'],
                             "link": f"https://x.com/{username}/status/{tid}",
@@ -161,7 +143,8 @@ def get_latest_tweets():
                             "timestamp": t['created_at']
                         }
                         try:
-                            requests.post(N8N_WEBHOOK_URL, json=payload, timeout=10)
+                            # 发 webhook 不需要指纹，用普通的 post 即可，或者复用 session
+                            session.post(N8N_WEBHOOK_URL, json=payload)
                         except:
                             pass
                         last_seen_ids[username] = tid
@@ -172,20 +155,21 @@ def get_latest_tweets():
                 print(f"解析失败: {e}", flush=True)
 
         elif response and response.status_code == 429:
-            print("⚠️ 429 Rate Limit", flush=True)
+            print("⚠️ 429 限流 (休息30s)", flush=True)
             time.sleep(30)
         else:
-            code = response.status_code if response else "ConnectFail"
+            code = response.status_code if response else "TLS Block"
             print(f"❌ 失败: {code}", flush=True)
 
-        sleep_time = random.uniform(15, 20) # 保持慢速
+        # 稍微加快一点速度，因为伪装度高了
+        sleep_time = random.uniform(10, 15)
         print(f"   (冷却 {sleep_time:.1f}s)", flush=True)
         time.sleep(sleep_time)
 
     print("=== 等待 12 分钟 ===", flush=True)
 
 if __name__ == "__main__":
-    print("🔥 [System] 防断连加强版启动...", flush=True)
+    print("🔥 [System] TLS 指纹伪装版启动 (curl_cffi)...", flush=True)
     get_latest_tweets()
     schedule.every(12).minutes.do(get_latest_tweets)
 
