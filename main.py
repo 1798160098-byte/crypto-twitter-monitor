@@ -15,7 +15,7 @@ TARGET_ACCOUNTS = [
 
 N8N_WEBHOOK_URL = "http://43.139.245.223:5678/webhook/6d6ea3d6-ba16-4d9d-9145-22425474ab48"
 
-# ================= 🔴 核心凭证 =================
+# ================= 🔴 核心凭证 (请确认 Cookie 是最新的) =================
 
 raw_cookie_str = """
 guest_id=v1%3A176710344905549891; auth_token=c3778b43e1705ad15fd2e8b683087db33fb3aa1e; ct0=368af3c63dffcc690f8557421437270654944077c8fdd21103da457e4225508284c606385efa8dd6b74c5463e87eb42c0c91b68620b1e1827e0c8e8eb1db381efcc70fdce615e3d0351dc886b27b0cf0; lang=en; twid=u%3D2006001874949009408; personalization_id="v1_H+HZUYrPDKtvqjYJt3R+rw=="
@@ -35,17 +35,18 @@ headers = {
     'x-csrf-token': csrf_token,
     'x-twitter-auth-type': 'OAuth2Session',
     'x-twitter-client-language': 'en',
-    'referer': 'https://x.com/home',
-    'origin': 'https://x.com'
+    'referer': 'https://x.com/',
+    'origin': 'https://x.com',
+    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'
 }
 
-# ================= ⚡️ 接口 ID 更新 (关键修改) =================
+# ================= ⚡️ 移植自开源项目的最新 ID =================
 
-# 2024年最新 ID，如果这两个还不行，就是 Cookie 彻底死了
-# UserByScreenName
-URL_ID = 'https://x.com/i/api/graphql/NunuHZS0vG8E9gZ3tXj81Q/UserByScreenName'
-# UserTweets (UserTweetsAndReplies)
-URL_TWEETS = 'https://x.com/i/api/graphql/E3opETHurwdBlYKmHfGXqQ/UserTweets'
+# 1. 获取 ID: UserByScreenName
+URL_ID = 'https://x.com/i/api/graphql/xc8f1g7BYqr6VTzTbvNlGw/UserByScreenName'
+
+# 2. 获取推文: UserTweets
+URL_TWEETS = 'https://x.com/i/api/graphql/9zyyd1hebl7oNWIPdA8HRw/UserTweets'
 
 user_id_cache = {} 
 last_seen_ids = {}
@@ -55,28 +56,50 @@ def get_user_id(username):
     if username in user_id_cache:
         return user_id_cache[username]
     
-    variables = {"screen_name": username, "withSafetyModeUserFields": True}
-    features = {"hidden_profile_likes_enabled": False, "responsive_web_graphql_exclude_directive_enabled": True, "verified_phone_label_enabled": False, "subscriptions_verification_info_is_identity_verified_enabled": False, "subscriptions_verification_info_verified_since_enabled": True, "highlights_tweets_tab_ui_enabled": True, "responsive_web_twitter_article_notes_tab_enabled": False, "creator_subscriptions_tweet_preview_api_enabled": True, "responsive_web_graphql_skip_user_profile_image_extensions_enabled": False, "responsive_web_graphql_timeline_navigation_enabled": True}
+    # 严格按照开源项目的参数配置
+    variables = {
+        "screen_name": username, 
+        "withSafetyModeUserFields": False
+    }
+    features = {
+        "hidden_profile_likes_enabled": False, 
+        "hidden_profile_subscriptions_enabled": False, 
+        "responsive_web_graphql_exclude_directive_enabled": True, 
+        "verified_phone_label_enabled": False, 
+        "subscriptions_verification_info_verified_since_enabled": True, 
+        "highlights_tweets_tab_ui_enabled": True, 
+        "creator_subscriptions_tweet_preview_api_enabled": True, 
+        "responsive_web_graphql_skip_user_profile_image_extensions_enabled": False, 
+        "responsive_web_graphql_timeline_navigation_enabled": True
+    }
+    fieldToggles = {"withAuxiliaryUserLabels": False}
     
     try:
-        r = requests.get(URL_ID, params={'variables': json.dumps(variables), 'features': json.dumps(features)}, cookies=cookies, headers=headers, impersonate="chrome110")
+        # 这里把 fieldToggles 也加进去了，确保万无一失
+        params = {
+            'variables': json.dumps(variables), 
+            'features': json.dumps(features),
+            'fieldToggles': json.dumps(fieldToggles)
+        }
+        r = requests.get(URL_ID, params=params, cookies=cookies, headers=headers, impersonate="chrome110", timeout=10)
         
         if r.status_code == 200:
-            uid = r.json().get('data', {}).get('user', {}).get('result', {}).get('rest_id')
+            data = r.json()
+            # 路径: data -> user -> result -> rest_id
+            uid = data.get('data', {}).get('user', {}).get('result', {}).get('rest_id')
             if uid:
                 user_id_cache[username] = uid
-                # print(f"   [ID获取成功] @{username} -> {uid}", flush=True)
                 return uid
         else:
-            # 🔥 关键调试信息：打印为什么获取ID失败
-            print(f"   ❌ ID接口报错 [{r.status_code}]: {r.text[:100]}", flush=True)
+            print(f"   ❌ ID接口报错 [{r.status_code}]: {r.text[:50]}", flush=True)
             
     except Exception as e:
-        print(f"   ❌ 网络异常: {e}", flush=True)
+        print(f"   ❌ ID网络异常: {e}", flush=True)
     
     return None
 
 def fetch_tweets(username, uid):
+    """获取该ID的推文"""
     variables = {
         "userId": uid,
         "count": 20,
@@ -85,28 +108,48 @@ def fetch_tweets(username, uid):
         "withVoice": True,
         "withV2Timeline": True
     }
+    # 这里的 features 也是直接从那个项目中提取的，非常完整
     features = {
-        "rweb_video_screen_enabled": False,
+        "rweb_tipjar_consumption_enabled": True,
         "responsive_web_graphql_exclude_directive_enabled": True,
         "verified_phone_label_enabled": False,
         "creator_subscriptions_tweet_preview_api_enabled": True,
         "responsive_web_graphql_timeline_navigation_enabled": True,
         "responsive_web_graphql_skip_user_profile_image_extensions_enabled": False,
-        "tweet_awards_web_tipping_enabled": False,
         "communities_web_enable_tweet_community_results_fetch": True,
         "c9s_tweet_anatomy_moderator_badge_enabled": True,
+        "articles_preview_enabled": True,
+        "tweetypie_unmention_optimization_enabled": True,
+        "responsive_web_edit_tweet_api_enabled": True,
+        "graphql_is_translatable_rweb_tweet_is_translatable_enabled": True,
+        "view_counts_everywhere_api_enabled": True,
+        "longform_notetweets_consumption_enabled": True,
+        "responsive_web_twitter_article_tweet_consumption_enabled": True,
+        "tweet_awards_web_tipping_enabled": False,
+        "creator_subscriptions_quote_tweet_preview_enabled": False,
+        "freedom_of_speech_not_reach_fetch_enabled": True,
+        "standardized_nudges_misinfo": True,
         "tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled": True,
-        "responsive_web_grok_image_annotation_enabled": False,
+        "tweet_with_visibility_results_prefer_gql_media_interstitial_enabled": True,
+        "rweb_video_timestamps_enabled": True,
+        "longform_notetweets_rich_text_read_enabled": True,
+        "longform_notetweets_inline_media_enabled": True,
         "responsive_web_enhance_cards_enabled": False
     }
+    fieldToggles = {"withArticlePlainText": False}
 
     try:
-        return requests.get(URL_TWEETS, params={'variables': json.dumps(variables), 'features': json.dumps(features)}, cookies=cookies, headers=headers, impersonate="chrome110", timeout=15)
+        params = {
+            'variables': json.dumps(variables), 
+            'features': json.dumps(features),
+            'fieldToggles': json.dumps(fieldToggles)
+        }
+        return requests.get(URL_TWEETS, params=params, cookies=cookies, headers=headers, impersonate="chrome110", timeout=15)
     except Exception as e:
         return None
 
 def main_loop():
-    print(f"\n[{datetime.now().strftime('%H:%M:%S')}] === 启动主页监控 (Fix ID版) ===", flush=True)
+    print(f"\n[{datetime.now().strftime('%H:%M:%S')}] === 启动开源项目移植版 ===", flush=True)
     
     if not csrf_token:
         print("❌ 错误: Cookie 无效！", flush=True)
@@ -118,7 +161,7 @@ def main_loop():
         # 1. 尝试获取 ID
         uid = get_user_id(username)
         if not uid:
-            print(" -> 跳过", flush=True)
+            print(" -> ❌ 无法获取ID", flush=True)
             time.sleep(2)
             continue
             
@@ -156,7 +199,7 @@ def main_loop():
                     for t in new_tweets:
                         tid = t['id_str']
                         payload = {
-                            "source": "monitor_v4",
+                            "source": "monitor_v5_opensource",
                             "author": username,
                             "content_raw": t['full_text'],
                             "link": f"https://x.com/{username}/status/{tid}",
@@ -177,17 +220,16 @@ def main_loop():
             print("⚠️ 限流 (休息60s)", flush=True)
             time.sleep(60)
         else:
-            # 打印获取推文时的具体错误
             msg = resp.text[:50] if resp else "Error"
             code = resp.status_code if resp else "Err"
             print(f"❌ 获取失败 [{code}]: {msg}", flush=True)
 
-        time.sleep(random.uniform(10, 20))
+        time.sleep(random.uniform(8, 15))
 
     print("=== 休息 12 分钟 ===", flush=True)
 
 if __name__ == "__main__":
-    print("🔥 [System] Fix ID 版启动...", flush=True)
+    print("🔥 [System] 开源移植版启动...", flush=True)
     main_loop()
     schedule.every(12).minutes.do(main_loop)
 
